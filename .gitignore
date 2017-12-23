@@ -1,0 +1,12 @@
+# Generals
+.DS_Store
+.idea
+
+# Deps
+vendor/**
+
+# PKI
+*.crt
+*.csr
+*.pem
+*.key
