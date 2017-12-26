@@ -1,7 +1,6 @@
 package electrum
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
 	"log"
@@ -13,10 +12,8 @@ func TestClient(t *testing.T) {
 	// node.xbt.eu:50002
 	const testAddress = "1ErbiumBjW4ScHNhLCcNWK5fFsKFpsYpWb"
 	const testServer = "erbium1.sytes.net:50002"
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	client, err := New(ctx, &Options{
+	
+	client, err := New(&Options{
 		Address:   testServer,
 		TLS:       &tls.Config{InsecureSkipVerify: true},
 		KeepAlive: true,
@@ -24,6 +21,7 @@ func TestClient(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
+	defer client.Close()
 
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()

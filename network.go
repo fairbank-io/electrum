@@ -2,16 +2,15 @@ package electrum
 
 import (
 	"bufio"
-	"context"
 	"crypto/tls"
 	"net"
 )
 
 type transport struct {
 	conn     net.Conn
-	ctx      context.Context
 	messages chan []byte
 	errors   chan error
+	done     chan bool
 	w        *bufio.Writer
 	r        *bufio.Reader
 }
@@ -23,7 +22,7 @@ type transportOptions struct {
 
 // Initialize a proper underlying network connection that can be terminated
 // by the provided context
-func getTransport(ctx context.Context, opts *transportOptions) (*transport, error) {
+func getTransport(opts *transportOptions) (*transport, error) {
 	var conn net.Conn
 	var err error
 
@@ -41,9 +40,9 @@ func getTransport(ctx context.Context, opts *transportOptions) (*transport, erro
 
 	t := &transport{
 		conn:     conn,
-		ctx:      ctx,
 		messages: make(chan []byte),
 		errors:   make(chan error),
+		done:     make(chan bool),
 		w:        bufio.NewWriter(conn),
 		r:        bufio.NewReader(conn),
 	}
@@ -60,12 +59,17 @@ func (t *transport) sendMessage(message []byte) error {
 	return err
 }
 
+// Finish execution and close network connection
+func (t *transport) close() {
+	close(t.done)
+}
+
 // Wait for new messages on the network connection until
 // the instance is signaled to stop
 func (t *transport) listen() {
 	for {
 		select {
-		case <-t.ctx.Done():
+		case <-t.done:
 			t.conn.Close()
 			return
 		default:

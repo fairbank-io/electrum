@@ -1,7 +1,6 @@
 package electrum
 
 import (
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -30,9 +29,9 @@ type Client struct {
 	Address   string
 	Version   string
 	Protocol  string
+	done      chan bool
 	transport *transport
 	counter   int
-	ctx       context.Context
 	subs      map[int]*subscription
 	ping      *time.Ticker
 	log       *log.Logger
@@ -48,8 +47,8 @@ type subscription struct {
 
 // Starts a new client instance; all operations and communications can be
 // terminated using the provided context
-func New(ctx context.Context, options *Options) (*Client, error) {
-	t, err := getTransport(ctx, &transportOptions{
+func New(options *Options) (*Client, error) {
+	t, err := getTransport(&transportOptions{
 		address: options.Address,
 		tls:     options.TLS,
 	})
@@ -70,7 +69,7 @@ func New(ctx context.Context, options *Options) (*Client, error) {
 	client := &Client{
 		transport: t,
 		counter:   0,
-		ctx:       ctx,
+		done:      make(chan bool),
 		subs:      make(map[int]*subscription),
 		log:       options.Log,
 		Address:   options.Address,
@@ -99,7 +98,7 @@ func New(ctx context.Context, options *Options) (*Client, error) {
 func (c *Client) handleMessages() {
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-c.done:
 			if c.ping != nil {
 				c.ping.Stop()
 			}
@@ -218,6 +217,12 @@ func (c *Client) startSubscription(sub *subscription) error {
 		return err
 	}
 	return nil
+}
+
+// Finish execution and terminate underlying network transport
+func (c *Client) Close() {
+	close(c.done)
+	c.transport.close()
 }
 
 // 'server.version'
