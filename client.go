@@ -1,6 +1,7 @@
 package electrum
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,7 @@ type subscription struct {
 	params   []string
 	messages chan *response
 	handler  func(*response)
+	ctx      context.Context
 }
 
 // Starts a new client instance; all operations and communications can be
@@ -106,6 +108,10 @@ func (c *Client) handleMessages() {
 				c.removeSubscription(i)
 			}
 			return
+		case err := <-c.transport.errors:
+			if c.log != nil {
+				c.log.Println(err)
+			}
 		case m := <-c.transport.messages:
 			if c.log != nil {
 				c.log.Println(m)
@@ -190,13 +196,22 @@ func (c *Client) syncRequest(req *request) (*response, error) {
 	return <-res, nil
 }
 
-// Start a subscription processing loop; will be terminated when the subscription
-// messages channel is closed, i.e., when the subscription is removed
+// Start a subscription processing loop
 func (c *Client) startSubscription(sub *subscription) error {
 	// Start processing loop
+	// Will be terminating when closing the subscription's context or
+	// by closing it's messages channel
 	go func() {
-		for msg := range sub.messages {
-			sub.handler(msg)
+		for {
+			select {
+			case msg, ok := <-sub.messages:
+				if !ok {
+					return
+				}
+				sub.handler(msg)
+			case <-sub.ctx.Done():
+				return
+			}
 		}
 	}()
 
@@ -257,12 +272,13 @@ func (c *Client) ServerDonationAddress() (string, error) {
 
 // 'blockchain.headers.subscribe'
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-headers-subscribe
-func (c *Client) NotifyBlockHeaders() (<-chan *BlockHeader, error) {
+func (c *Client) NotifyBlockHeaders(ctx context.Context) (<-chan *BlockHeader, error) {
 	headers := make(chan *BlockHeader)
 	sub := &subscription{
+		ctx:      ctx,
 		method:   "blockchain.headers.subscribe",
 		messages: make(chan *response),
-		handler: func(m *response) {
+		handler:  func(m *response) {
 			if m.Result != nil {
 				h := &BlockHeader{}
 				b, _ := json.Marshal(m.Result)
@@ -289,19 +305,19 @@ func (c *Client) NotifyBlockHeaders() (<-chan *BlockHeader, error) {
 
 // blockchain.numblocks.subscribe
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-numblocks-subscribe
-func (c *Client) NotifyBlockNums() (<-chan int, error) {
+func (c *Client) NotifyBlockNums(ctx context.Context) (<-chan int, error) {
 	nums := make(chan int)
 	sub := &subscription{
+		ctx:      ctx,
 		method:   "blockchain.numblocks.subscribe",
 		messages: make(chan *response),
-		handler: func(m *response) {
+		handler:  func(m *response) {
 			if m.Result != nil {
 				nums <- int(m.Result.(float64))
 				return
 			}
 
 			if m.Params != nil {
-				log.Printf("parsing: %+v", m)
 				for _, v := range m.Params.([]interface{}) {
 					nums <- int(v.(float64))
 				}
@@ -317,13 +333,14 @@ func (c *Client) NotifyBlockNums() (<-chan int, error) {
 
 // blockchain.address.subscribe
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-address-subscribe
-func (c *Client) NotifyAddressTransactions(address string) (<-chan string, error) {
+func (c *Client) NotifyAddressTransactions(ctx context.Context, address string) (<-chan string, error) {
 	txs := make(chan string)
 	sub := &subscription{
+		ctx:      ctx,
 		method:   "blockchain.address.subscribe",
 		params:   []string{address},
 		messages: make(chan *response),
-		handler: func(m *response) {
+		handler:  func(m *response) {
 			if m.Result != nil {
 				txs <- m.Result.(string)
 			}

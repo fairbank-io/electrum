@@ -1,6 +1,7 @@
 package electrum
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"log"
@@ -120,45 +121,51 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("NotifyBlockNums", func(t *testing.T) {
-		nums, err := client.NotifyBlockNums()
+		ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+		defer cancel()
+		nums, err := client.NotifyBlockNums(ctx)
 		if err != nil {
 			t.Error(err)
 		}
-		counter := 0
-		for h := range nums {
-			counter += 1
-			log.Printf("%+v\n", h)
-			if counter >= 1 {
+		for {
+			select {
+			case n := <-nums:
+				log.Printf("%+v\n", n)
+			case <-ctx.Done():
 				return
 			}
 		}
 	})
 
 	t.Run("NotifyBlockHeaders", func(t *testing.T) {
-		headers, err := client.NotifyBlockHeaders()
+		ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+		defer cancel()
+		headers, err := client.NotifyBlockHeaders(ctx)
 		if err != nil {
 			t.Error(err)
 		}
-		counter := 0
-		for h := range headers {
-			counter += 1
-			log.Printf("%+v\n", h)
-			if counter >= 1 {
+		for {
+			select {
+			case h := <-headers:
+				log.Printf("%+v\n", h)
+			case <-ctx.Done():
 				return
 			}
 		}
 	})
 
 	t.Run("NotifyAddressTransactions", func(t *testing.T) {
-		txs, err := client.NotifyAddressTransactions(testAddress)
+		ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+		defer cancel()
+		txs, err := client.NotifyAddressTransactions(ctx, testAddress)
 		if err != nil {
 			t.Error(err)
 		}
-		counter := 0
-		for t := range txs {
-			counter += 1
-			log.Printf("%+v\n", t)
-			if counter >= 1 {
+		for {
+			select {
+			case t := <-txs:
+				log.Printf("%+v\n", t)
+			case <-ctx.Done():
 				return
 			}
 		}
