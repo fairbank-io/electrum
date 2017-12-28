@@ -2,6 +2,7 @@ package electrum
 
 import "encoding/json"
 
+// Tx represents a transaction entry on the blockchain
 type Tx struct {
 	Hash   string `json:"tx_hash"`
 	Pos    uint64 `json:"tx_pos"`
@@ -9,11 +10,14 @@ type Tx struct {
 	Value  uint64 `json:"value"`
 }
 
+// Balance show the funds available to an address, both
+// confirmed and unconfirmed
 type Balance struct {
 	Confirmed   uint64 `json:"confirmed"`
 	Unconfirmed uint64 `json:"unconfirmed"`
 }
 
+// BlockHeader display summarized details about an existing block in the chain
 type BlockHeader struct {
 	BlockHeight   uint64 `json:"block_height"`
 	PrevBlockHash string `json:"prev_block_hash"`

@@ -15,21 +15,39 @@ import (
 // http://docs.electrum.org/en/latest/protocol.html#format
 const delimiter = byte('\n')
 
-// Available configuration options
+// Options define the available configuration options
 type Options struct {
+	// Address of the server to use for network communications
 	Address   string
+	
+	// Version advertised by the client instance
 	Version   string
+	
+	// Protocol version preferred by the client instance
 	Protocol  string
+	
+	// If set to true, will enable the client to continuously dispatch
+	// a 'server.version' operation every 60 seconds
 	KeepAlive bool
+	
+	// If provided, will be used to setup a secure network connection with the server
 	TLS       *tls.Config
+	
+	// If provided, will be used as logging sink
 	Log       *log.Logger
 }
 
-// Protocol client instance
+// Client defines the protocol client instance structure and interface
 type Client struct {
-	Address   string
-	Version   string
-	Protocol  string
+	// Address of the remote server to use for communication
+	Address string
+
+	// Version of the client
+	Version string
+
+	// Protocol version preferred by the client instance
+	Protocol string
+
 	done      chan bool
 	transport *transport
 	counter   int
@@ -47,8 +65,7 @@ type subscription struct {
 	ctx      context.Context
 }
 
-// Starts a new client instance; all operations and communications can be
-// terminated using the provided context
+// New will create and start processing on a new client instance
 func New(options *Options) (*Client, error) {
 	t, err := getTransport(&transportOptions{
 		address: options.Address,
@@ -122,16 +139,20 @@ func (c *Client) handleMessages() {
 			}
 
 			if resp.Method != "" {
+				c.Lock()
 				for _, sub := range c.subs {
 					if sub.method == resp.Method {
 						sub.messages <- resp
 					}
 				}
+				c.Unlock()
 				break
 			}
 
 			// Message routed by ID
+			c.Lock()
 			sub, ok := c.subs[resp.Id]
+			c.Unlock()
 			if ok {
 				sub.messages <- resp
 			}
@@ -234,13 +255,14 @@ func (c *Client) startSubscription(sub *subscription) error {
 	return nil
 }
 
-// Finish execution and terminate underlying network transport
+// Close will finish execution and properly terminate the underlying network transport
 func (c *Client) Close() {
 	close(c.done)
 	c.transport.close()
 }
 
-// 'server.version'
+// ServerVersion will synchronously run a 'server.version' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#server-version
 func (c *Client) ServerVersion() (string, error) {
 	res, err := c.syncRequest(c.req("server.version", c.Version, c.Protocol))
@@ -250,7 +272,8 @@ func (c *Client) ServerVersion() (string, error) {
 	return res.Result.(string), nil
 }
 
-// 'server.banner'
+// ServerBanner will synchronously run a 'server.banner' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#server-banner
 func (c *Client) ServerBanner() (string, error) {
 	res, err := c.syncRequest(c.req("server.banner"))
@@ -260,7 +283,8 @@ func (c *Client) ServerBanner() (string, error) {
 	return res.Result.(string), nil
 }
 
-// 'server.donation_address'
+// ServerDonationAddress will synchronously run a 'server.donation_address' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#server-donation-address
 func (c *Client) ServerDonationAddress() (string, error) {
 	res, err := c.syncRequest(c.req("server.donation_address"))
@@ -270,7 +294,8 @@ func (c *Client) ServerDonationAddress() (string, error) {
 	return res.Result.(string), nil
 }
 
-// 'blockchain.headers.subscribe'
+// NotifyBlockHeaders will setup a subscription for the method 'blockchain.headers.subscribe'
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-headers-subscribe
 func (c *Client) NotifyBlockHeaders(ctx context.Context) (<-chan *BlockHeader, error) {
 	headers := make(chan *BlockHeader)
@@ -278,7 +303,7 @@ func (c *Client) NotifyBlockHeaders(ctx context.Context) (<-chan *BlockHeader, e
 		ctx:      ctx,
 		method:   "blockchain.headers.subscribe",
 		messages: make(chan *response),
-		handler:  func(m *response) {
+		handler: func(m *response) {
 			if m.Result != nil {
 				h := &BlockHeader{}
 				b, _ := json.Marshal(m.Result)
@@ -303,7 +328,8 @@ func (c *Client) NotifyBlockHeaders(ctx context.Context) (<-chan *BlockHeader, e
 	return headers, nil
 }
 
-// blockchain.numblocks.subscribe
+// NotifyBlockNums will setup a subscription for the method 'blockchain.numblocks.subscribe'
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-numblocks-subscribe
 func (c *Client) NotifyBlockNums(ctx context.Context) (<-chan int, error) {
 	nums := make(chan int)
@@ -311,7 +337,7 @@ func (c *Client) NotifyBlockNums(ctx context.Context) (<-chan int, error) {
 		ctx:      ctx,
 		method:   "blockchain.numblocks.subscribe",
 		messages: make(chan *response),
-		handler:  func(m *response) {
+		handler: func(m *response) {
 			if m.Result != nil {
 				nums <- int(m.Result.(float64))
 				return
@@ -331,7 +357,8 @@ func (c *Client) NotifyBlockNums(ctx context.Context) (<-chan int, error) {
 	return nums, nil
 }
 
-// blockchain.address.subscribe
+// NotifyAddressTransactions will setup a subscription for the method 'blockchain.address.subscribe'
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-address-subscribe
 func (c *Client) NotifyAddressTransactions(ctx context.Context, address string) (<-chan string, error) {
 	txs := make(chan string)
@@ -340,7 +367,7 @@ func (c *Client) NotifyAddressTransactions(ctx context.Context, address string) 
 		method:   "blockchain.address.subscribe",
 		params:   []string{address},
 		messages: make(chan *response),
-		handler:  func(m *response) {
+		handler: func(m *response) {
 			if m.Result != nil {
 				txs <- m.Result.(string)
 			}
@@ -359,7 +386,8 @@ func (c *Client) NotifyAddressTransactions(ctx context.Context, address string) 
 	return txs, nil
 }
 
-// 'blockchain.address.get_balance'
+// AddressBalance will synchronously run a 'blockchain.address.get_balance' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-address-get-balance
 func (c *Client) AddressBalance(address string) (balance *Balance, err error) {
 	res, err := c.syncRequest(c.req("blockchain.address.get_balance", address))
@@ -372,7 +400,8 @@ func (c *Client) AddressBalance(address string) (balance *Balance, err error) {
 	return
 }
 
-// 'blockchain.address.get_history'
+// AddressHistory will synchronously run a 'blockchain.address.get_history' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-address-get-history
 func (c *Client) AddressHistory(address string) (list *[]Tx, err error) {
 	res, err := c.syncRequest(c.req("blockchain.address.get_history", address))
@@ -385,7 +414,8 @@ func (c *Client) AddressHistory(address string) (list *[]Tx, err error) {
 	return
 }
 
-// 'blockchain.address.get_mempool'
+// AddressMempool will synchronously run a 'blockchain.address.get_mempool' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-address-get-mempool
 func (c *Client) AddressMempool(address string) (list *[]Tx, err error) {
 	res, err := c.syncRequest(c.req("blockchain.address.get_mempool", address))
@@ -398,7 +428,8 @@ func (c *Client) AddressMempool(address string) (list *[]Tx, err error) {
 	return
 }
 
-// 'blockchain.address.listunspent'
+// AddressListUnspent will synchronously run a 'blockchain.address.listunspent' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-address-listunspent
 func (c *Client) AddressListUnspent(address string) (list *[]Tx, err error) {
 	res, err := c.syncRequest(c.req("blockchain.address.listunspent", address))
@@ -411,7 +442,8 @@ func (c *Client) AddressListUnspent(address string) (list *[]Tx, err error) {
 	return
 }
 
-// 'blockchain.block.get_header'
+// BlockHeader will synchronously run a 'blockchain.block.get_header' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-block-get-header
 func (c *Client) BlockHeader(index int) (header *BlockHeader, err error) {
 	res, err := c.syncRequest(c.req("blockchain.block.get_header", strconv.Itoa(index)))
@@ -424,7 +456,8 @@ func (c *Client) BlockHeader(index int) (header *BlockHeader, err error) {
 	return
 }
 
-// 'blockchain.transaction.broadcast'
+// BroadcastTransaction will synchronously run a 'blockchain.transaction.broadcast' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-transaction-broadcast
 func (c *Client) BroadcastTransaction(hex string) (string, error) {
 	res, err := c.syncRequest(c.req("blockchain.transaction.broadcast", hex))
@@ -434,7 +467,8 @@ func (c *Client) BroadcastTransaction(hex string) (string, error) {
 	return res.Result.(string), nil
 }
 
-// 'blockchain.transaction.get'
+// GetTransaction will synchronously run a 'blockchain.transaction.get' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-transaction-get
 func (c *Client) GetTransaction(hash string) (string, error) {
 	res, err := c.syncRequest(c.req("blockchain.transaction.get", hash))
@@ -444,7 +478,8 @@ func (c *Client) GetTransaction(hash string) (string, error) {
 	return res.Result.(string), nil
 }
 
-// 'blockchain.estimatefee'
+// EstimateFee will synchronously run a 'blockchain.estimatefee' operation
+//
 // http://docs.electrum.org/en/latest/protocol.html#blockchain-estimatefee
 func (c *Client) EstimateFee(blocks int) (float64, error) {
 	res, err := c.syncRequest(c.req("blockchain.estimatefee", strconv.Itoa(blocks)))
@@ -456,27 +491,37 @@ func (c *Client) EstimateFee(blocks int) (float64, error) {
 
 // Not implemented protocol methods for lack of documentation
 
-// blockchain.address.get_proof
+// AddressProof will synchronously run a 'blockchain.address.get_proof' operation
+//
+// Not implemented yet
 func (c *Client) AddressProof(address string) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-// blockchain.utxo.get_address
+// UTXOAddress will synchronously run a 'blockchain.utxo.get_address' operation
+//
+// Not implemented yet
 func (c *Client) UTXOAddress(utxo string) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-// blockchain.block.get_chunk
+// BlockChunk will synchronously run a 'blockchain.block.get_chunk' operation
+//
+// Not implemented yet
 func (c *Client) BlockChunk(index int) (interface{}, error) {
 	return nil, errors.New("not implemented")
 }
 
-// blockchain.transaction.get_merkle
+// TransactionMerkle will synchronously run a 'blockchain.transaction.get_merkle' operation
+//
+// Not implemented yet
 func (c *Client) TransactionMerkle(tx string) (string, error) {
 	return "", errors.New("not implemented")
 }
 
-// server.peers.subscribe
+// NotifyServerPeers will setup a subscription for the method 'server.peers.subscribe'
+//
+// Not implemented yet
 func (c *Client) NotifyServerPeers() (<-chan string, error) {
 	return nil, errors.New("not implemented")
 }

@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log"
 	"testing"
 	"time"
 )
 
 func TestClient(t *testing.T) {
-	// node.xbt.eu:50002
 	const testAddress = "1ErbiumBjW4ScHNhLCcNWK5fFsKFpsYpWb"
 	const testServer = "erbium1.sytes.net:50002"
 	
@@ -121,7 +121,7 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("NotifyBlockNums", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		nums, err := client.NotifyBlockNums(ctx)
 		if err != nil {
@@ -155,7 +155,7 @@ func TestClient(t *testing.T) {
 	})
 
 	t.Run("NotifyAddressTransactions", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		txs, err := client.NotifyAddressTransactions(ctx, testAddress)
 		if err != nil {
@@ -209,4 +209,26 @@ func TestClient(t *testing.T) {
 	})
 
 	return
+}
+
+func ExampleClient_ServerVersion() {
+	client, _ := New(&Options{
+		Address: "erbium1.sytes.net:50002",
+		TLS:       &tls.Config{InsecureSkipVerify: true},
+	})
+	defer client.Close()
+	version, _ := client.ServerVersion()
+	fmt.Println(version)
+	// Output: ElectrumX 1.2.1
+}
+
+func ExampleClient_ServerDonationAddress() {
+	client, _ := New(&Options{
+		Address: "erbium1.sytes.net:50002",
+		TLS:       &tls.Config{InsecureSkipVerify: true},
+	})
+	defer client.Close()
+	addr, _ := client.ServerDonationAddress()
+	fmt.Println(addr)
+	// Output: 1ErbiumBjW4ScHNhLCcNWK5fFsKFpsYpWb
 }
