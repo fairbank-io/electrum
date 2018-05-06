@@ -3,7 +3,7 @@
 [![Build Status](https://travis-ci.org/fairbank-io/electrum.svg?branch=master)](https://travis-ci.org/fairbank-io/electrum)
 [![GoDoc](https://godoc.org/github.com/fairbank-io/electrum?status.svg)](https://godoc.org/github.com/fairbank-io/electrum)
 [![Version](https://img.shields.io/github/tag/fairbank-io/electrum.svg)](https://github.com/fairbank-io/electrum/releases)
-[![Software License](https://img.shields.io/badge/license-MIT-brightgreen.svg)](LICENSE)
+[![Software License](https://img.shields.io/badge/license-MIT-red.svg)](LICENSE)
 
 Provides a pure Go electrum protocol client implementation.
 
