@@ -3,7 +3,20 @@ package electrum
 import (
 	"bufio"
 	"crypto/tls"
+	"io"
 	"net"
+	"time"
+)
+
+// Known connection state values
+type ConnectionState string
+
+// Connection state flags
+const (
+	Ready        ConnectionState = "READY"
+	Disconnected ConnectionState = "DISCONNECTED"
+	Reconnecting ConnectionState = "RECONNECTING"
+	Closed       ConnectionState = "CLOSED"
 )
 
 type transport struct {
@@ -11,7 +24,9 @@ type transport struct {
 	messages chan []byte
 	errors   chan error
 	done     chan bool
-	w        *bufio.Writer
+	ready    bool
+	opts     *transportOptions
+	state    chan ConnectionState
 	r        *bufio.Reader
 }
 
@@ -20,42 +35,69 @@ type transportOptions struct {
 	tls     *tls.Config
 }
 
-// Initialize a proper underlying network connection that can be terminated
-// by the provided context
-func getTransport(opts *transportOptions) (*transport, error) {
-	var conn net.Conn
-	var err error
-
+// Get network connection
+func connect(opts *transportOptions) (net.Conn, error) {
 	if opts.tls != nil {
-		conn, err = tls.Dial("tcp", opts.address, opts.tls)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		conn, err = net.Dial("tcp", opts.address)
-		if err != nil {
-			return nil, err
-		}
+		return tls.Dial("tcp", opts.address, opts.tls)
+	}
+	return net.Dial("tcp", opts.address)
+}
+
+// Initialize a proper handler for the underlying network connection
+func getTransport(opts *transportOptions) (*transport, error) {
+	conn, err := connect(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	t := &transport{
-		conn:     conn,
+		done:     make(chan bool),
 		messages: make(chan []byte),
 		errors:   make(chan error),
-		done:     make(chan bool),
-		w:        bufio.NewWriter(conn),
-		r:        bufio.NewReader(conn),
+		state:    make(chan ConnectionState),
+		opts:     opts,
 	}
+	t.setup(conn)
 	go t.listen()
 	return t, nil
 }
 
+// Prepare transport instance for usage with a given network connection
+func (t *transport) setup(conn net.Conn) {
+	t.conn = conn
+	t.ready = true
+	t.r = bufio.NewReader(t.conn)
+}
+
+// Attempt automatic reconnection
+func (t *transport) reconnect() {
+	t.conn.Close()
+	t.ready = false
+	t.state <- Reconnecting
+
+	// Future implementations could include support for a max number of retries
+	// and dynamically increasing the interval
+	rt := time.NewTicker(5 * time.Second)
+	go func() {
+		defer rt.Stop()
+		for range rt.C {
+			conn, err := connect(t.opts)
+			if err == nil {
+				t.setup(conn)
+				break
+			}
+		}
+		go t.listen()
+	}()
+}
+
 // Send raw bytes across the network
 func (t *transport) sendMessage(message []byte) error {
-	_, err := t.w.Write(message)
-	if err == nil {
-		t.w.Flush()
+	if !t.ready {
+		return ErrUnreachableHost
 	}
+
+	_, err := t.conn.Write(message)
 	return err
 }
 
@@ -67,13 +109,24 @@ func (t *transport) close() {
 // Wait for new messages on the network connection until
 // the instance is signaled to stop
 func (t *transport) listen() {
+	t.state <- Ready
+LOOP:
 	for {
 		select {
 		case <-t.done:
 			t.conn.Close()
-			return
+			t.state <- Closed
+			break LOOP
 		default:
 			line, err := t.r.ReadBytes(delimiter)
+
+			// Detect dropped connections
+			if err == io.EOF {
+				t.state <- Disconnected
+				t.reconnect()
+				break LOOP
+			}
+
 			if err != nil {
 				t.errors <- err
 				break
