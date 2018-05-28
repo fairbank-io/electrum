@@ -16,6 +16,7 @@ const (
 	Ready        ConnectionState = "READY"
 	Disconnected ConnectionState = "DISCONNECTED"
 	Reconnecting ConnectionState = "RECONNECTING"
+	Reconnected  ConnectionState = "RECONNECTED"
 	Closed       ConnectionState = "CLOSED"
 )
 
@@ -37,10 +38,17 @@ type transportOptions struct {
 
 // Get network connection
 func connect(opts *transportOptions) (net.Conn, error) {
-	if opts.tls != nil {
-		return tls.Dial("tcp", opts.address, opts.tls)
+	conn, err := net.Dial("tcp", opts.address)
+	if err != nil {
+		return nil, err
 	}
-	return net.Dial("tcp", opts.address)
+	conn.(*net.TCPConn).SetKeepAlive(true)
+	conn.(*net.TCPConn).SetKeepAlivePeriod(30 * time.Second)
+
+	if opts.tls != nil {
+		return tls.Client(conn, opts.tls), nil
+	}
+	return conn, nil
 }
 
 // Initialize a proper handler for the underlying network connection
@@ -84,6 +92,7 @@ func (t *transport) reconnect() {
 			conn, err := connect(t.opts)
 			if err == nil {
 				t.setup(conn)
+				t.state <- Reconnected
 				break
 			}
 		}
