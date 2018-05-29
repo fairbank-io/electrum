@@ -99,6 +99,7 @@ type response struct {
 // Protocol request structure
 // http://docs.electrum.org/en/latest/protocol.html#request
 type request struct {
+	RPC    string   `json:"jsonrpc"`
 	Id     int      `json:"id"`
 	Method string   `json:"method"`
 	Params []string `json:"params"`
@@ -106,6 +107,9 @@ type request struct {
 
 // Properly encode a request object and append the message delimiter
 func (r *request) encode() ([]byte, error) {
+	if r.RPC == "" {
+		r.RPC = "2.0"
+	}
 	b, err := json.Marshal(r)
 	if err != nil {
 		return nil, err
