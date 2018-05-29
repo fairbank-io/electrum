@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,15 +17,18 @@ import (
 const Version = "0.3.0"
 
 // Protocol tags
-const Protocol10 = "1.0"
-const Protocol11 = "1.1"
-const Protocol12 = "1.2"
+const (
+	Protocol10 = "1.0"
+	Protocol11 = "1.1"
+	Protocol12 = "1.2"
+)
 
 // Common errors
 var (
 	ErrDeprecatedMethod  = errors.New("DEPRECATED_METHOD")
 	ErrUnavailableMethod = errors.New("UNAVAILABLE_METHOD")
 	ErrRejectedTx        = errors.New("REJECTED_TRANSACTION")
+	ErrUnreachableHost   = errors.New("UNREACHABLE_HOST")
 )
 
 // Message Delimiter, according to the protocol specification
@@ -34,14 +38,14 @@ const delimiter = byte('\n')
 // Options define the available configuration options
 type Options struct {
 	// Address of the server to use for network communications
-	Address   string
-	
+	Address string
+
 	// Version advertised by the client instance
-	Version   string
-	
+	Version string
+
 	// Protocol version preferred by the client instance
-	Protocol  string
-	
+	Protocol string
+
 	// If set to true, will enable the client to continuously dispatch
 	// a 'server.version' operation every 60 seconds
 	KeepAlive bool
@@ -49,12 +53,12 @@ type Options struct {
 	// Agent identifier that will be transmitted to the server when required;
 	// will be concatenated with the client version
 	Agent string
-	
+
 	// If provided, will be used to setup a secure network connection with the server
-	TLS       *tls.Config
-	
+	TLS *tls.Config
+
 	// If provided, will be used as logging sink
-	Log       *log.Logger
+	Log *log.Logger
 }
 
 // Client defines the protocol client instance structure and interface
@@ -68,13 +72,17 @@ type Client struct {
 	// Protocol version preferred by the client instance
 	Protocol string
 
-	done      chan bool
-	transport *transport
-	counter   int
-	subs      map[int]*subscription
-	ping      *time.Ticker
-	log       *log.Logger
-	agent     string
+	done         chan bool
+	transport    *transport
+	counter      int
+	subs         map[int]*subscription
+	ping         *time.Ticker
+	log          *log.Logger
+	agent        string
+	bgProcessing context.Context
+	cleanUp      context.CancelFunc
+	resuming     context.Context
+	stopResuming context.CancelFunc
 	sync.Mutex
 }
 
@@ -112,39 +120,75 @@ func New(options *Options) (*Client, error) {
 		options.Agent = "fairbank-electrum"
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	client := &Client{
-		transport: t,
-		counter:   0,
-		done:      make(chan bool),
-		subs:      make(map[int]*subscription),
-		log:       options.Log,
-		agent:     fmt.Sprintf("%s-%s", options.Agent, options.Version),
-		Address:   options.Address,
-		Version:   options.Version,
-		Protocol:  options.Protocol,
+		transport:    t,
+		counter:      0,
+		bgProcessing: ctx,
+		cleanUp:      cancel,
+		done:         make(chan bool),
+		subs:         make(map[int]*subscription),
+		log:          options.Log,
+		agent:        fmt.Sprintf("%s-%s", options.Agent, options.Version),
+		Address:      options.Address,
+		Version:      options.Version,
+		Protocol:     options.Protocol,
 	}
 
-	// Automatically send a 'server.version' request every 60 seconds as a keep-alive
+	// Automatically send a 'server.version' or 'server.ping' request every 60 seconds as a keep-alive
 	// signal to the server
 	if options.KeepAlive {
 		client.ping = time.NewTicker(60 * time.Second)
 		go func() {
-			for range client.ping.C {
-				var req *request
-				switch client.Protocol {
-				case Protocol12:
-					req = client.req("server.ping")
-				default:
-					req = client.req("server.version", client.Version, client.Protocol)
+			defer client.ping.Stop()
+			for {
+				select {
+				case <-client.ping.C:
+					// "server.ping" is not recognized by the server in the current release (1.4.3)
+					b, _ := client.req("server.version", client.Version, client.Protocol).encode()
+					client.transport.sendMessage(b)
+				case <-client.bgProcessing.Done():
+					return
 				}
-				b, _ := req.encode()
-				client.transport.sendMessage(b)
 			}
 		}()
 	}
 
+	// Monitor transport state
+	go func() {
+		for {
+			select {
+			case s := <-client.transport.state:
+				if s == Reconnected && len(client.subs) > 0 {
+					go client.resumeSubscriptions()
+				}
+			case <-client.bgProcessing.Done():
+				return
+			}
+		}
+	}()
+
 	go client.handleMessages()
 	return client, nil
+}
+
+// Build a request object
+func (c *Client) req(name string, params ...string) *request {
+	c.Lock()
+	defer c.Unlock()
+
+	// If no parameters are specified send an empty array
+	// http://docs.electrum.org/en/latest/protocol.html#request
+	if len(params) == 0 {
+		params = []string{}
+	}
+	req := &request{
+		Id:     c.counter,
+		Method: name,
+		Params: params,
+	}
+	c.counter++
+	return req
 }
 
 // Receive incoming network messages and the 'stop' signal
@@ -152,12 +196,10 @@ func (c *Client) handleMessages() {
 	for {
 		select {
 		case <-c.done:
-			if c.ping != nil {
-				c.ping.Stop()
-			}
 			for i := range c.subs {
 				c.removeSubscription(i)
 			}
+			c.cleanUp()
 			return
 		case err := <-c.transport.errors:
 			if c.log != nil {
@@ -172,6 +214,7 @@ func (c *Client) handleMessages() {
 				break
 			}
 
+			// Message routed by method name
 			if resp.Method != "" {
 				c.Lock()
 				for _, sub := range c.subs {
@@ -205,50 +248,38 @@ func (c *Client) removeSubscription(id int) {
 	}
 }
 
-// Build a request object
-func (c *Client) req(name string, params ...string) *request {
-	c.Lock()
-	defer c.Unlock()
-
-	// If no parameters are specified send an empty array
-	// http://docs.electrum.org/en/latest/protocol.html#request
-	if len(params) == 0 {
-		params = []string{}
+// Restart processing of existing subscriptions; intended to be triggered after
+// recovering from a dropped connection
+func (c *Client) resumeSubscriptions() {
+	// Handle existing resume attempts
+	if c.stopResuming != nil {
+		c.stopResuming()
 	}
-	req := &request{
-		Id:     c.counter,
-		Method: name,
-		Params: params,
-	}
-	c.counter++
-	return req
-}
+	c.resuming, c.stopResuming = context.WithCancel(context.Background())
 
-// Dispatch a synchronous request, i.e. wait for it's result
-func (c *Client) syncRequest(req *request) (*response, error) {
-	// Setup a subscription for the request with proper cleanup
-	res := make(chan *response)
-	c.Lock()
-	c.subs[req.Id] = &subscription{messages: res}
-	c.Unlock()
-	defer c.removeSubscription(req.Id)
-
-	// Encode and dispatch the request
-	b, err := req.encode()
-	if err != nil {
-		return nil, err
-	}
-	if err := c.transport.sendMessage(b); err != nil {
-		return nil, err
+	// Wait for the connection to be responsive
+	rt := time.NewTicker(2 * time.Second)
+	defer rt.Stop()
+WAIT:
+	for {
+		select {
+		case <-rt.C:
+			if _, err := c.ServerVersion(); err == nil {
+				break WAIT
+			}
+		case <-c.resuming.Done():
+			return
+		case <-c.bgProcessing.Done():
+			return
+		}
 	}
 
-	// Log request
-	if c.log != nil {
-		c.log.Println(req)
+	// Restart existing subscriptions
+	for id, sub := range c.subs {
+		c.removeSubscription(id)
+		sub.messages = make(chan *response)
+		c.startSubscription(sub)
 	}
-
-	// Wait for the response
-	return <-res, nil
 }
 
 // Start a subscription processing loop
@@ -289,10 +320,37 @@ func (c *Client) startSubscription(sub *subscription) error {
 	return nil
 }
 
+// Dispatch a synchronous request, i.e. wait for it's result
+func (c *Client) syncRequest(req *request) (*response, error) {
+	// Setup a subscription for the request with proper cleanup
+	res := make(chan *response)
+	c.Lock()
+	c.subs[req.Id] = &subscription{messages: res}
+	c.Unlock()
+	defer c.removeSubscription(req.Id)
+
+	// Encode and dispatch the request
+	b, err := req.encode()
+	if err != nil {
+		return nil, err
+	}
+	if err := c.transport.sendMessage(b); err != nil {
+		return nil, err
+	}
+
+	// Log request
+	if c.log != nil {
+		c.log.Println(req)
+	}
+
+	// Wait for the response
+	return <-res, nil
+}
+
 // Close will finish execution and properly terminate the underlying network transport
 func (c *Client) Close() {
-	close(c.done)
 	c.transport.close()
+	close(c.done)
 }
 
 // Ping the server to ensure it is responding, and to keep the session alive.
@@ -302,8 +360,14 @@ func (c *Client) Close() {
 func (c *Client) ServerPing() error {
 	switch c.Protocol {
 	case Protocol12:
-		_, err := c.syncRequest(c.req("server.ping"))
-		return err
+		res, err := c.syncRequest(c.req("server.ping"))
+		if err != nil {
+			return err
+		}
+		if res.Error != nil {
+			return errors.New(res.Error.Message)
+		}
+		return nil
 	default:
 		return ErrUnavailableMethod
 	}
@@ -591,11 +655,7 @@ func (c *Client) BroadcastTransaction(hex string) (string, error) {
 		return "", err
 	}
 
-	if res.Error != nil {
-		return "", errors.New(res.Error.Message)
-	}
-
-	if res.Result == nil {
+	if res.Result == nil || strings.Contains(res.Result.(string), "rejected") {
 		return "", ErrRejectedTx
 	}
 
@@ -654,8 +714,8 @@ func (c *Client) TransactionMerkle(tx string, height int) (tm *TxMerkle, err err
 }
 
 /*-----------------
- DEPRECATED METHODS
- -----------------*/
+DEPRECATED METHODS
+-----------------*/
 
 // UTXOAddress will synchronously run a 'blockchain.utxo.get_address' operation
 // https://electrumx.readthedocs.io/en/latest/protocol-methods.html#blockchain.utxo.get_address

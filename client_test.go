@@ -6,13 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestClient(t *testing.T) {
 	const testAddress = "1ErbiumBjW4ScHNhLCcNWK5fFsKFpsYpWb"
-	const testServer = "erbium1.sytes.net:50002"
+	const testServer = "electrum.villocq.com:50002" // erbium1.sytes.net:50002 | ex-btc.server-on.net:50002
 
 	t.Run("Protocol_1.0", func(t *testing.T) {
 		client, err := New(&Options{
@@ -23,16 +24,9 @@ func TestClient(t *testing.T) {
 		})
 		if err != nil {
 			t.Error(err)
+			return
 		}
 		defer client.Close()
-
-		ticker := time.NewTicker(20 * time.Second)
-		defer ticker.Stop()
-		go func() {
-			for range ticker.C {
-				log.Println("*")
-			}
-		}()
 
 		t.Run("ServerPing", func(t *testing.T) {
 			err := client.ServerPing()
@@ -137,12 +131,11 @@ func TestClient(t *testing.T) {
 		})
 
 		t.Run("BroadcastTransaction", func(t *testing.T) {
-			res, err := client.BroadcastTransaction("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0702621b03cfd201ffffffff010000000000000000016a00000000")
-			if err == nil {
+			_, err := client.BroadcastTransaction("01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff0702621b03cfd201ffffffff010000000000000000016a00000000")
+			if err != ErrRejectedTx {
 				t.Error(errors.New("unexpected result"))
 				return
 			}
-			log.Printf("%+v\n", res)
 		})
 
 		t.Run("GetTransaction", func(t *testing.T) {
@@ -250,16 +243,9 @@ func TestClient(t *testing.T) {
 		})
 		if err != nil {
 			t.Error(err)
+			return
 		}
 		defer client.Close()
-
-		ticker := time.NewTicker(20 * time.Second)
-		defer ticker.Stop()
-		go func() {
-			for range ticker.C {
-				log.Println("*")
-			}
-		}()
 
 		t.Run("ServerPing", func(t *testing.T) {
 			err := client.ServerPing()
@@ -481,20 +467,13 @@ func TestClient(t *testing.T) {
 		})
 		if err != nil {
 			t.Error(err)
+			return
 		}
 		defer client.Close()
 
-		ticker := time.NewTicker(20 * time.Second)
-		defer ticker.Stop()
-		go func() {
-			for range ticker.C {
-				log.Println("*")
-			}
-		}()
-
 		t.Run("ServerPing", func(t *testing.T) {
 			err := client.ServerPing()
-			if err != nil {
+			if !strings.Contains(err.Error(), "unknown method") {
 				t.Error(err)
 				return
 			}
@@ -710,7 +689,7 @@ func TestClient(t *testing.T) {
 
 func ExampleClient_ServerVersion() {
 	client, _ := New(&Options{
-		Address: "erbium1.sytes.net:50002",
+		Address: "electrum.villocq.com:50002",
 		TLS:     &tls.Config{
 			InsecureSkipVerify: true,
 		},
@@ -723,7 +702,7 @@ func ExampleClient_ServerVersion() {
 
 func ExampleClient_ServerDonationAddress() {
 	client, _ := New(&Options{
-		Address: "erbium1.sytes.net:50002",
+		Address: "electrum.villocq.com:50002",
 		TLS:     &tls.Config{
 			InsecureSkipVerify: true,
 		},
@@ -731,5 +710,5 @@ func ExampleClient_ServerDonationAddress() {
 	defer client.Close()
 	addr, _ := client.ServerDonationAddress()
 	fmt.Println(addr)
-	// Output: 1ErbiumBjW4ScHNhLCcNWK5fFsKFpsYpWb
+	// Output: bc1q3jc48stsmulrvsyulpgyekfggfapxrpc3ertgk
 }
