@@ -144,9 +144,12 @@ func New(options *Options) (*Client, error) {
 			for {
 				select {
 				case <-client.ping.C:
+					// Deliberately ignore errors produced by "ping" messages
 					// "server.ping" is not recognized by the server in the current release (1.4.3)
-					b, _ := client.req("server.version", client.Version, client.Protocol).encode()
-					client.transport.sendMessage(b)
+					if b, err := client.req("server.version", client.Version, client.Protocol).encode(); err == nil {
+						/* #nosec */
+						client.transport.sendMessage(b)
+					}
 				case <-client.bgProcessing.Done():
 					return
 				}
@@ -281,7 +284,9 @@ WAIT:
 	for id, sub := range c.subs {
 		c.removeSubscription(id)
 		sub.messages = make(chan *response)
-		c.startSubscription(sub)
+		if err := c.startSubscription(sub); err != nil {
+			c.log.Printf("failed to resume subscription '%s' with error: %s\n", sub.method, err)
+		}
 	}
 }
 
@@ -397,8 +402,13 @@ func (c *Client) ServerVersion() (*VersionInfo, error) {
 		fallthrough
 	case Protocol12:
 		var d []string
-		b, _ := json.Marshal(res.Result)
-		json.Unmarshal(b, &d)
+		b, err := json.Marshal(res.Result)
+		if err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(b, &d); err != nil {
+			return nil, err
+		}
 		info.Software = d[0]
 		info.Protocol = d[1]
 	}
@@ -455,8 +465,13 @@ func (c *Client) ServerFeatures() (*ServerInfo, error) {
 			return nil, errors.New(res.Error.Message)
 		}
 
-		b, _ := json.Marshal(res.Result)
-		json.Unmarshal(b, &info)
+		b, err := json.Marshal(res.Result)
+		if err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(b, &info); err != nil {
+			return nil, err
+		}
 	}
 	return info, nil
 }
@@ -476,16 +491,26 @@ func (c *Client) ServerPeers() (peers []*Peer, err error) {
 	}
 
 	var list []interface{}
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &list)
+	b, err := json.Marshal(res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &list); err != nil {
+		return
+	}
 
 	for _, l := range list {
 		p := &Peer{
 			Address: l.([]interface{})[0].(string),
 			Name:    l.([]interface{})[1].(string),
 		}
-		b, _ := json.Marshal(l.([]interface{})[2])
-		json.Unmarshal(b, &p.Features)
+		b, err := json.Marshal(l.([]interface{})[2])
+		if err != nil {
+			continue
+		}
+		if err = json.Unmarshal(b, &p.Features); err != nil {
+			continue
+		}
 		peers = append(peers, p)
 	}
 	return
@@ -505,8 +530,13 @@ func (c *Client) AddressBalance(address string) (balance *Balance, err error) {
 		return
 	}
 
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &balance)
+	b, err := json.Marshal(res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &balance); err != nil {
+		return
+	}
 	return
 }
 
@@ -524,8 +554,13 @@ func (c *Client) AddressHistory(address string) (list *[]Tx, err error) {
 		return
 	}
 
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &list)
+	b, err := json.Marshal(res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &list); err != nil {
+		return
+	}
 	return
 }
 
@@ -543,8 +578,13 @@ func (c *Client) AddressMempool(address string) (list *[]Tx, err error) {
 		return
 	}
 
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &list)
+	b, err := json.Marshal(res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &list); err != nil {
+		return
+	}
 	return
 }
 
@@ -562,8 +602,13 @@ func (c *Client) AddressListUnspent(address string) (list *[]Tx, err error) {
 		return
 	}
 
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &list)
+	b, err := json.Marshal(res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &list); err != nil {
+		return
+	}
 	return
 }
 
@@ -581,8 +626,13 @@ func (c *Client) BlockHeader(index int) (header *BlockHeader, err error) {
 		return
 	}
 
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &header)
+	b, err := json.Marshal(res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &header); err != nil {
+		return
+	}
 	return
 }
 
@@ -648,7 +698,13 @@ func (c *Client) TransactionMerkle(tx string, height int) (tm *TxMerkle, err err
 		return
 	}
 
-	b, _ := json.Marshal(res.Result)
-	json.Unmarshal(b, &tm)
+	b, err := json.Marshal(res.Result)
+	log.Printf("%s", res.Result)
+	if err != nil {
+		return
+	}
+	if err = json.Unmarshal(b, &tm); err != nil {
+		return
+	}
 	return
 }

@@ -17,17 +17,27 @@ func (c *Client) NotifyBlockHeaders(ctx context.Context) (<-chan *BlockHeader, e
 		handler: func(m *response) {
 			if m.Result != nil {
 				h := &BlockHeader{}
-				b, _ := json.Marshal(m.Result)
-				json.Unmarshal(b, h)
-				headers <- h
+				var b []byte
+				var err error
+				if b, err = json.Marshal(m.Result); err != nil {
+					return
+				}
+				if err = json.Unmarshal(b, h); err == nil {
+					headers <- h
+				}
 			}
 
 			if m.Params != nil {
 				for _, i := range m.Params.([]interface{}) {
 					h := &BlockHeader{}
-					b, _ := json.Marshal(i)
-					json.Unmarshal(b, h)
-					headers <- h
+					var b []byte
+					var err error
+					if b, err = json.Marshal(i); err != nil {
+						continue
+					}
+					if err = json.Unmarshal(b, h); err == nil {
+						headers <- h
+					}
 				}
 			}
 		},

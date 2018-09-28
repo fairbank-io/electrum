@@ -44,8 +44,12 @@ func connect(opts *transportOptions) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn.(*net.TCPConn).SetKeepAlive(true)
-	conn.(*net.TCPConn).SetKeepAlivePeriod(30 * time.Second)
+	if err := conn.(*net.TCPConn).SetKeepAlive(true); err != nil {
+		return nil, err
+	}
+	if err := conn.(*net.TCPConn).SetKeepAlivePeriod(30 * time.Second); err != nil {
+		return nil, err
+	}
 
 	if opts.tls != nil {
 		return tls.Client(conn, opts.tls), nil
@@ -83,7 +87,9 @@ func (t *transport) setup(conn net.Conn) {
 
 // Attempt automatic reconnection
 func (t *transport) reconnect() {
-	t.conn.Close()
+	if err := t.conn.Close(); err != nil {
+		t.errors <- err
+	}
 	t.mu.Lock()
 	t.ready = false
 	t.mu.Unlock()
@@ -131,7 +137,9 @@ LOOP:
 	for {
 		select {
 		case <-t.done:
-			t.conn.Close()
+			if err := t.conn.Close(); err != nil {
+				t.errors <- err
+			}
 			t.state <- Closed
 			break LOOP
 		default:

@@ -6,7 +6,8 @@ test: ## Run all tests excluding the vendor dependencies
 	golint .
 	ineffassign .
 	misspell .
-	gocyclo -over 15 .
+	gosec ./...
+	gocyclo -over 15 `find . -iname '*.go' | grep -v 'vendor' | grep -v '_test.go'`
 	go test -v -race .
 
 help: ## Display available make targets

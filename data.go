@@ -54,7 +54,7 @@ type Tx struct {
 
 // TxMerkle provides the merkle branch of a given transaction
 type TxMerkle struct {
-	BlockHeight uint64   `json:"block_height"`
+	BlockHeight string   `json:"block_height"`
 	Pos         uint64   `json:"pos"`
 	Merkle      []string `json:"merkle"`
 }
