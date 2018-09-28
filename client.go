@@ -160,8 +160,8 @@ func New(options *Options) (*Client, error) {
 			select {
 			case s := <-client.transport.state:
 				client.Lock()
-			  count := len(client.subs)
-			  client.Unlock()
+				count := len(client.subs)
+				client.Unlock()
 				if s == Reconnected && count > 0 {
 					go client.resumeSubscriptions()
 				}
