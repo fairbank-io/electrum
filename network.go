@@ -5,10 +5,11 @@ import (
 	"crypto/tls"
 	"io"
 	"net"
+	"sync"
 	"time"
 )
 
-// Known connection state values
+// ConnectionState represents known connection state values
 type ConnectionState string
 
 // Connection state flags
@@ -29,6 +30,7 @@ type transport struct {
 	opts     *transportOptions
 	state    chan ConnectionState
 	r        *bufio.Reader
+	mu       sync.Mutex
 }
 
 type transportOptions struct {
@@ -72,6 +74,8 @@ func getTransport(opts *transportOptions) (*transport, error) {
 
 // Prepare transport instance for usage with a given network connection
 func (t *transport) setup(conn net.Conn) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.conn = conn
 	t.ready = true
 	t.r = bufio.NewReader(t.conn)
@@ -80,7 +84,9 @@ func (t *transport) setup(conn net.Conn) {
 // Attempt automatic reconnection
 func (t *transport) reconnect() {
 	t.conn.Close()
+	t.mu.Lock()
 	t.ready = false
+	t.mu.Unlock()
 	t.state <- Reconnecting
 
 	// Future implementations could include support for a max number of retries
@@ -102,6 +108,8 @@ func (t *transport) reconnect() {
 
 // Send raw bytes across the network
 func (t *transport) sendMessage(message []byte) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if !t.ready {
 		return ErrUnreachableHost
 	}

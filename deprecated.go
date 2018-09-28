@@ -27,28 +27,27 @@ func (c *Client) BlockChunk(index int) (interface{}, error) {
 // https://electrumx.readthedocs.io/en/latest/protocol-changes.html#deprecated-methods
 func (c *Client) NotifyBlockNums(ctx context.Context) (<-chan int, error) {
 	return nil, ErrDeprecatedMethod
-
-	nums := make(chan int)
-	sub := &subscription{
-		ctx:      ctx,
-		method:   "blockchain.numblocks.subscribe",
-		messages: make(chan *response),
-		handler: func(m *response) {
-			if m.Result != nil {
-				nums <- int(m.Result.(float64))
-				return
-			}
-
-			if m.Params != nil {
-				for _, v := range m.Params.([]interface{}) {
-					nums <- int(v.(float64))
-				}
-			}
-		},
-	}
-	if err := c.startSubscription(sub); err != nil {
-		close(nums)
-		return nil, err
-	}
-	return nums, nil
+	// nums := make(chan int)
+	// sub := &subscription{
+	// 	ctx:      ctx,
+	// 	method:   "blockchain.numblocks.subscribe",
+	// 	messages: make(chan *response),
+	// 	handler: func(m *response) {
+	// 		if m.Result != nil {
+	// 			nums <- int(m.Result.(float64))
+	// 			return
+	// 		}
+	//
+	// 		if m.Params != nil {
+	// 			for _, v := range m.Params.([]interface{}) {
+	// 				nums <- int(v.(float64))
+	// 			}
+	// 		}
+	// 	},
+	// }
+	// if err := c.startSubscription(sub); err != nil {
+	// 	close(nums)
+	// 	return nil, err
+	// }
+	// return nums, nil
 }

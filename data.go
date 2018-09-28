@@ -89,7 +89,7 @@ type rpcError struct {
 // http://docs.electrum.org/en/latest/protocol.html#response
 type response struct {
 	RPC    string      `json:"jsonrpc"`
-	Id     int         `json:"id"`
+	ID     int         `json:"id"`
 	Method string      `json:"method"`
 	Params interface{} `json:"params"`
 	Result interface{} `json:"result"`
@@ -100,7 +100,7 @@ type response struct {
 // http://docs.electrum.org/en/latest/protocol.html#request
 type request struct {
 	RPC    string   `json:"jsonrpc"`
-	Id     int      `json:"id"`
+	ID     int      `json:"id"`
 	Method string   `json:"method"`
 	Params []string `json:"params"`
 }

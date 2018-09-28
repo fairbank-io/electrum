@@ -1,9 +1,9 @@
 # Electrum Client
-
 [![Build Status](https://travis-ci.org/fairbank-io/electrum.svg?branch=master)](https://travis-ci.org/fairbank-io/electrum)
 [![GoDoc](https://godoc.org/github.com/fairbank-io/electrum?status.svg)](https://godoc.org/github.com/fairbank-io/electrum)
 [![Version](https://img.shields.io/github/tag/fairbank-io/electrum.svg)](https://github.com/fairbank-io/electrum/releases)
 [![Software License](https://img.shields.io/badge/license-MIT-red.svg)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/fairbank-io/electrum?style=flat)](https://goreportcard.com/report/github.com/fairbank-io/electrum)
 
 Provides a pure Go electrum protocol client implementation.
 
@@ -35,5 +35,5 @@ for header := range headers {
 }
 
 // Finish client execution
-client.Close();
+client.Close()
 ```

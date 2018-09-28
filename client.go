@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// Client version
-const Version = "0.3.0"
+// Version flag for the library
+const Version = "0.4.1"
 
 // Protocol tags
 const (
@@ -159,7 +159,10 @@ func New(options *Options) (*Client, error) {
 		for {
 			select {
 			case s := <-client.transport.state:
-				if s == Reconnected && len(client.subs) > 0 {
+				client.Lock()
+			  count := len(client.subs)
+			  client.Unlock()
+				if s == Reconnected && count > 0 {
 					go client.resumeSubscriptions()
 				}
 			case <-client.bgProcessing.Done():
@@ -183,7 +186,7 @@ func (c *Client) req(name string, params ...string) *request {
 		params = []string{}
 	}
 	req := &request{
-		Id:     c.counter,
+		ID:     c.counter,
 		Method: name,
 		Params: params,
 	}
@@ -228,7 +231,7 @@ func (c *Client) handleMessages() {
 
 			// Message routed by ID
 			c.Lock()
-			sub, ok := c.subs[resp.Id]
+			sub, ok := c.subs[resp.ID]
 			c.Unlock()
 			if ok {
 				sub.messages <- resp
@@ -304,17 +307,17 @@ func (c *Client) startSubscription(sub *subscription) error {
 	// Register subscription
 	req := c.req(sub.method, sub.params...)
 	c.Lock()
-	c.subs[req.Id] = sub
+	c.subs[req.ID] = sub
 	c.Unlock()
 
 	// Send request to the server
 	b, err := req.encode()
 	if err != nil {
-		c.removeSubscription(req.Id)
+		c.removeSubscription(req.ID)
 		return err
 	}
 	if err := c.transport.sendMessage(b); err != nil {
-		c.removeSubscription(req.Id)
+		c.removeSubscription(req.ID)
 		return err
 	}
 	return nil
@@ -325,9 +328,9 @@ func (c *Client) syncRequest(req *request) (*response, error) {
 	// Setup a subscription for the request with proper cleanup
 	res := make(chan *response)
 	c.Lock()
-	c.subs[req.Id] = &subscription{messages: res}
+	c.subs[req.ID] = &subscription{messages: res}
 	c.Unlock()
-	defer c.removeSubscription(req.Id)
+	defer c.removeSubscription(req.ID)
 
 	// Encode and dispatch the request
 	b, err := req.encode()
@@ -353,8 +356,8 @@ func (c *Client) Close() {
 	close(c.done)
 }
 
-// Ping the server to ensure it is responding, and to keep the session alive.
-// The server may disconnect clients that have sent no requests for roughly 10 minutes.
+// ServerPing will send a ping message to the server to ensure it is responding, and to keep the
+// session alive. The server may disconnect clients that have sent no requests for roughly 10 minutes.
 //
 // https://electrumx.readthedocs.io/en/latest/protocol-methods.html#server-ping
 func (c *Client) ServerPing() error {
@@ -434,31 +437,31 @@ func (c *Client) ServerDonationAddress() (string, error) {
 	return res.Result.(string), nil
 }
 
-// Return a list of features and services supported by the server
+// ServerFeatures returns a list of features and services supported by the server
 //
 // https://electrumx.readthedocs.io/en/latest/protocol-methods.html#server-donation-address
-func (c *Client) ServerFeatures() (info *ServerInfo, err error) {
+func (c *Client) ServerFeatures() (*ServerInfo, error) {
+	info := new(ServerInfo)
 	switch c.Protocol {
 	case Protocol10:
-		err = ErrUnavailableMethod
+		return nil, ErrUnavailableMethod
 	default:
 		res, err := c.syncRequest(c.req("server.features"))
 		if err != nil {
-			break
+			return nil, err
 		}
 
 		if res.Error != nil {
-			err = errors.New(res.Error.Message)
-			break
+			return nil, errors.New(res.Error.Message)
 		}
 
 		b, _ := json.Marshal(res.Result)
 		json.Unmarshal(b, &info)
 	}
-	return
+	return info, nil
 }
 
-// Return a list of peer servers
+// ServerPeers returns a list of peer servers
 //
 // https://electrumx.readthedocs.io/en/latest/protocol-methods.html#server-peers-subscribe
 func (c *Client) ServerPeers() (peers []*Peer, err error) {
